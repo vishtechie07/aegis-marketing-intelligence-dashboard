@@ -1,0 +1,20 @@
+# profile: local — H2 in-memory. Key via Settings UI or SPRING_AI_OPENAI_API_KEY.
+spring:
+  ai:
+    openai:
+      api-key: ${SPRING_AI_OPENAI_API_KEY:sk-placeholder-no-real-calls}
+  datasource:
+    url: jdbc:h2:mem:aegis;DB_CLOSE_DELAY=-1;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+
+aegis.sources.github.org-map: "{'Microsoft':'microsoft','Google':'google','Amazon':'aws','OpenAI':'openai','Anthropic':'anthropic'}"

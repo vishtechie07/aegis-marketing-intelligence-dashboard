@@ -1,0 +1,36 @@
+spring:
+  ai:
+    openai:
+      api-key: sk-test-placeholder
+  datasource:
+    url: jdbc:h2:mem:testdb;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+  flyway:
+    enabled: false
+
+aegis:
+  harvest:
+    competitors: TestCorp,AcmeCo
+  sources:
+    rss:
+      feeds: https://example.com/rss
+      cron: "0 */30 * * * *"
+    gdelt:
+      cron: "0 */15 * * * *"
+    reddit:
+      cron: "0 */30 * * * *"
+    hackernews:
+      cron: "0 */20 * * * *"
+    edgar:
+      cron: "0 0 */4 * * *"
+    github:
+      cron: "0 0 * * * *"
+      org-map: "{TestCorp: testcorp}"
