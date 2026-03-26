@@ -1,63 +1,130 @@
 # Aegis Intelligence Engine
 
-A real-time competitor intelligence platform that harvests news, processes it through a 3-stage Spring AI agent pipeline, and streams insights to a Vue 3 dashboard via Server-Sent Events.
+Real-time competitor intelligence dashboard that ingests multi-source market signals, runs a 3-agent AI analysis pipeline, and streams prioritized insights to an operations UI.
 
-## Stack
+## What This Project Demonstrates
+
+- Production-style full-stack architecture (`Spring Boot + Vue + Postgres`)
+- Event-driven UX via Server-Sent Events (SSE) instead of polling
+- AI agent orchestration with fallback-safe execution semantics
+- Typed backend/frontend contracts (`Java records` <-> `TypeScript interfaces`)
+- Dockerized local environment with database migrations and health checks
+
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Backend | Java 21, Spring Boot 3.4, WebFlux, Spring AI (OpenAI) |
-| Database | PostgreSQL 16 (Docker) |
-| Migrations | Flyway |
-| Frontend | Vue 3, Vite, TypeScript, Tailwind CSS 4, Pinia |
-| Infrastructure | Docker Compose |
+| Backend | Java 21, Spring Boot 3.4, WebFlux, Spring AI |
+| Data | PostgreSQL 16, Spring Data JPA, Flyway |
+| Frontend | Vue 3 (`<script setup lang="ts">`), Vite, Pinia, Tailwind CSS |
+| Realtime | SSE (`Flux<ServerSentEvent<T>>` + Vue EventSource composable) |
+| Infrastructure | Docker Compose, Nginx (frontend container) |
+| Testing | JUnit 5 + AssertJ + Mockito (backend), Vitest + Playwright (frontend) |
 
-## Architecture
+## System Architecture
 
+```text
+External Signals
+  RSS / GDELT / SEC / Reddit / HackerNews / GitHub / Google News / Industry feeds
+        |
+        v
+Scheduled Harvesters (Spring)
+  - normalize source payloads
+  - save raw article to competitor_news
+        |
+        +--> Async Agent Orchestration (@Async)
+              1) NoiseCancelerAgent -> relevance gate
+              2) MarketAnalystAgent -> category classification
+              3) StrategistAgent    -> threat score + strategic advice
+                    |
+                    v
+              persist agent_insights
+                    |
+                    v
+              publish InsightEvent to Sinks.Many
+                    |
+                    v
+Frontend Dashboard (SSE subscription via Pinia store)
 ```
-RSS / GDELT / SEC / Reddit / HN / GitHub / Google News / Yahoo / USASpending / World Bank
-    → Harvester (Spring Scheduler) → PostgreSQL
-                                   → Agent Pipeline (Async)
-                                       ├── NoiseCanceler
-                                       ├── MarketAnalyst
-                                       └── Strategist → SSE Sink → Vue Dashboard
+
+## Core Pipeline Behavior
+
+1. Harvester persists raw data first for traceability.
+2. Orchestration runs asynchronously to avoid blocking ingestion.
+3. Agents are isolated services; failures degrade gracefully with safe defaults.
+4. Final insights are persisted and pushed to the live dashboard stream.
+
+This gives durability (database), observability (history), and low-latency delivery (SSE).
+
+## Repository Structure
+
+```text
+.
+├─ backend/
+│  ├─ src/main/java/com/aegis/
+│  │  ├─ agent/        # AI analysis stages
+│  │  ├─ harvester/    # source-specific ingestion
+│  │  ├─ controller/   # REST + SSE endpoints
+│  │  ├─ service/      # orchestration/business logic
+│  │  ├─ entity/       # JPA entities
+│  │  └─ dto/          # Java record contracts
+│  └─ src/main/resources/db/migration/  # Flyway SQL migrations
+├─ frontend/
+│  ├─ src/components/  # dashboard UI (threat cards, feed, settings)
+│  ├─ src/stores/      # Pinia state for insights/settings/competitors
+│  ├─ src/composables/ # SSE connection logic
+│  └─ src/types/       # DTO mirrors of backend contracts
+└─ docker-compose.yml
 ```
 
 ## Quick Start
 
 ### Prerequisites
-- Docker Desktop (optional; backend can run against local Postgres)
-- OpenAI API key: set via **Settings** in the dashboard (not stored in repo or logs)
 
-### 1. Configure environment
+- Docker Desktop (recommended path)
+- Or local runtimes: Java 21, Node 20+, PostgreSQL 16
+- API keys in `.env` (copy from `.env.example`)
+
+### 1) Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env if using Docker (e.g. POSTGRES_PASSWORD; OpenAI key via UI)
 ```
 
-### 2. Run with Docker
+Set required values (at minimum):
+
+- `POSTGRES_PASSWORD`
+- `OPENAI_API_KEY`
+- `NEWSAPI_KEY`
+
+Optional:
+
+- `TRACKED_COMPETITORS` (comma-separated)
+
+### 2) Run full stack with Docker
 
 ```bash
 docker compose up --build
 ```
 
+Services:
+
 | Service | URL |
 |---|---|
-| Dashboard | http://localhost:3000 |
+| Frontend Dashboard | http://localhost:3000 |
 | Backend API | http://localhost:8080 |
 | Postgres | localhost:5432 |
 
-### 3. Local development (without Docker)
+### 3) Run locally (without Docker)
 
-**Backend** — requires PostgreSQL running locally:
+Backend:
 
 ```bash
 cd backend
 ./mvnw spring-boot:run
 ```
 
-**Frontend:**
+Frontend:
 
 ```bash
 cd frontend
@@ -65,44 +132,70 @@ npm install
 npm run dev
 ```
 
-## API Reference
+## API Surface
 
-| Method | Endpoint | Description |
+| Method | Endpoint | Purpose |
 |---|---|---|
-| `GET` | `/api/insights/stream` | SSE stream of real-time insights |
-| `GET` | `/api/insights/latest?limit=20` | Most recent N insights |
-| `GET` | `/api/insights/threats?minLevel=7` | High-threat insights |
-| `POST` | `/api/insights/deep-dive` | Ask Agent deep-dive analysis |
-| `GET` | `/actuator/health` | Health check |
+| `GET` | `/api/insights/stream` | Realtime SSE stream of processed insights |
+| `GET` | `/api/insights/latest?limit=20` | Paginated latest insights |
+| `GET` | `/api/insights/threats?minLevel=7` | Filter high-threat intelligence |
+| `POST` | `/api/insights/deep-dive` | Follow-up analysis for a specific news item |
+| `GET` | `/actuator/health` | Service health and readiness |
 
-### Deep Dive Request
+Example deep-dive payload:
 
 ```json
-POST /api/insights/deep-dive
-{ "newsId": 123, "question": "What does this mean for our pricing strategy?" }
+{
+  "newsId": 123,
+  "question": "What does this move imply for our enterprise pricing strategy?"
+}
 ```
 
-## Agent Pipeline
+## Data Model
 
-1. **NoiseCanceler** — filters PR fluff and generic industry roundups
-2. **MarketAnalyst** — categorizes into `PRODUCT_LAUNCH | HIRING | FINANCIAL_MOVE | PARTNERSHIP | LEGAL | LEADERSHIP_CHANGE`
-3. **Strategist** — assigns a threat level (1-10) and generates a one-sentence strategic action
+Primary tables:
 
-## Database Schema
+- `competitor_news`: normalized raw harvest output
+- `agent_insights`: AI-enriched strategic records referencing `competitor_news`
+- `deep_dive_log`: persisted follow-up analysis interactions
 
-```sql
-competitor_news   -- raw harvested articles
-agent_insights    -- AI-processed insights (FK → competitor_news)
+Schema evolution is managed via Flyway migrations in `backend/src/main/resources/db/migration`.
+
+## Development and Testing
+
+Backend tests:
+
+```bash
+cd backend
+./mvnw test
 ```
 
-Migrations managed by Flyway in `backend/src/main/resources/db/migration/`.
+Frontend unit tests:
 
-## Key Metrics
+```bash
+cd frontend
+npm run test
+```
 
-- News → AI analysis latency: target < 2.5 seconds
-- Noise reduction: ~60% of articles filtered by NoiseCanceler
-- Scalability: Virtual Threads enabled for concurrent competitor tracking
+Frontend e2e smoke tests:
 
-## Environment Variables
+```bash
+cd frontend
+npm run test:e2e
+```
 
-See `.env.example` for all configuration options.
+## Operational Notes
+
+- Backend startup is ordered after Postgres health in `docker-compose.yml` to prevent migration races.
+- Harvesters are resilient: API/auth failures are logged, skipped, and retried on next schedule.
+- SSE uses a central publisher sink (`Sinks.Many`) as the realtime source of truth.
+
+## Why This Is Useful
+
+Most intelligence dashboards stop at data collection. Aegis adds an AI interpretation layer that turns raw news into:
+
+- relevance-filtered events,
+- categorized competitive signals,
+- threat-scored strategic actions,
+
+then delivers that stream in real time to support faster product and go-to-market decisions.
